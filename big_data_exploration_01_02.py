@@ -8,7 +8,9 @@ Original file is located at
 
 # Lab 01 / 02 - Techniques for Handling Large Datasets in Classification; K-means; K-medoids
 
-This homework is an exploration of the first two labs from DZD lessons, pertaining to dataset processing, feature engineering, and K-means/K-medoids clustering.
+This homework is an exploration of the first two labs from DZD lessons (mostly the second lab), pertaining to dataset processing, feature engineering, and K-means/K-medoids clustering. We will explore what correlations can be found in the data and how well we can predict them using data clustering on a limited amount of features.
+
+Self-link: https://colab.research.google.com/drive/1sj7PJCsZFktqZGZXOVjZsJZleVTx4d48?usp=sharing
 
 ## Data cleanup
 
@@ -533,4 +535,12 @@ plt.show()
 - Outliers
 
 So the k-means can still find some real geographical tendencies.
+
+## Conclusions
+
+* A much smaller sample, when cleaned up and sampled representatively, is enough to find correlations in the data.
+* Business districts traffic is nearly identical depending on the time of the day, most likely because taxi data is different from the public transport data.
+* However, geographical clustering nevertheless shows interesting correlations regarding fair amount, tip percentage etc.
+* Normalization is essential for k-means algorithm to function well.
+* Cluster count matters - the data is significantly noisier if the initial count is poorly chosen.
 """
