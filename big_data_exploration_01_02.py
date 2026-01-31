@@ -49,6 +49,8 @@ mask = (
     (taxi["trip_distance"] > 0) &
     (taxi["fare_amount"] >= 2.5) & # min fare in NYC
     (taxi["passenger_count"].between(1, 12)) &
+    taxi["pickup_latitude"].between(40.0, 41.5) & # NYC & boroughs & airports
+    taxi["pickup_longitude"].between(-75.0, -72.0) &
     taxi["dropoff_latitude"].between(40.0, 41.5) & # NYC & boroughs & airports
     taxi["dropoff_longitude"].between(-75.0, -72.0)
 )
@@ -78,8 +80,8 @@ del clean_taxi  # free up memory
 
 gc.collect()
 
-print(filtered_taxi["pickup_latitude"].min(), filtered_taxi["pickup_latitude"].max())
-print(filtered_taxi["dropoff_latitude"].min(), filtered_taxi["dropoff_longitude"].max())
+print("Latitude range:", filtered_taxi["pickup_latitude"].min(), filtered_taxi["pickup_latitude"].max())
+print("Logitude range:", filtered_taxi["dropoff_longitude"].min(), filtered_taxi["dropoff_longitude"].max())
 
 filtered_taxi[["pickup_latitude", "pickup_longitude", "dropoff_latitude", "dropoff_longitude"]].describe()
 
@@ -94,6 +96,7 @@ print(filtered_taxi[duration < 1].size,filtered_taxi[duration > 120].size)
 print(len(filtered_taxi[duration < 1]),len(filtered_taxi[duration > 120]))
 
 f2_taxi = filtered_taxi[(duration > 1) & (duration < 120)].copy()
+duration = (f2_taxi["dropoff_datetime"] - f2_taxi["pickup_datetime"]).dt.total_seconds() / 60 # recompute so that the incides align
 print(f"Rows: {len(f2_taxi)}")  # or f2_taxi.shape[0]
 print(f"Total elements: {f2_taxi.size}")  # rows × columns
 
@@ -126,7 +129,9 @@ f2_taxi.head()
 f2_taxi["hour"] = f2_taxi["pickup_datetime"].dt.hour
 f2_taxi["day_of_week"] = f2_taxi["pickup_datetime"].dt.dayofweek
 f2_taxi["is_weekend"] = f2_taxi["day_of_week"].isin([5, 6])
-f2_taxi["is_rush_hour"] = f2_taxi["hour"].isin([7, 9, 16, 18])
+f2_taxi["is_rush_hour"] = f2_taxi["hour"].between(7, 9) | f2_taxi["hour"].between(16, 18)
+f2_taxi["morning_rush"] = f2_taxi["hour"].between(7, 9)
+f2_taxi["evening_rush"] = f2_taxi["hour"].between(16, 18)
 f2_taxi["speed_mph"] = f2_taxi["trip_distance"] / (duration / 60)
 f2_taxi["route_efficiency"] = np.where(
     f2_taxi["geo_distance"] > 0,
@@ -170,11 +175,15 @@ There is no predefined classification task for this dataset. You should define y
 What evaluation approach will you use? How will you split the dataset into training and test sets?
 """
 
-cashless = taxi_batch[taxi_batch['payment_type'] == 1].copy()
-cashless["large_tip"] = (cashless["tip_amount"] > 0.2 * cashless["total_amount"])
-display(cashless.head())
+taxi_batch_geo = taxi_batch[["pickup_latitude", "pickup_longitude", "dropoff_latitude", "dropoff_longitude", "pickup_datetime", "dropoff_datetime", "is_weekend", "is_rush_hour", "morning_rush", "evening_rush"]].copy()
+# Manhattan business district: 40.74-40.76, lon -73.98 to -74.00
+taxi_batch_geo["from_business_district"] = taxi_batch_geo["pickup_latitude"].between(40.74, 40.76) & taxi_batch_geo["pickup_longitude"].between(-74.00, -73.98)
+taxi_batch_geo["to_business_district"] = taxi_batch_geo["dropoff_latitude"].between(40.74, 40.76) & taxi_batch_geo["dropoff_longitude"].between(-74.00, -73.98)
 
-cashless[cashless["large_tip"] == True]
+# dropoff close to midpoint than pickup
+midpoint = ((40.75 + 40.74) / 2, (-74.00 + -73.98) / 2)
+taxi_batch_geo["headed_downtown"] = np.linalg.norm(taxi_batch_geo[["pickup_latitude", "pickup_longitude"]] - midpoint, axis=1) < np.linalg.norm(taxi_batch_geo[["dropoff_latitude", "dropoff_longitude"]] - midpoint, axis=1)
+taxi_batch_geo.head()
 
 """## 4. Implement Different Techniques for Handling Large Datasets
 
@@ -214,11 +223,26 @@ Use the same techniques for handling large datasets as in the previous lab:
     Quantization techniques - reduce the number of distinct values for numerical features, e.g., by applying rounding, flooring, ceiling, or other techniques. Store values with reduced precision - it can reduce I/O time and memory usage and consequently speed up the computations.
 """
 
-cashless_for_k_means_x = cashless[["trip_distance", "passenger_count", "fare_amount"]]
-cashless_for_k_means_y = cashless["large_tip"]
-cashless_for_k_means_x.head()
+taxi_geo_x = taxi_batch_geo[["pickup_latitude", "pickup_longitude", "dropoff_latitude", "dropoff_longitude", "is_weekend"]]
+taxi_geo_x.head()
 
-def k_means(x, n_clusters=2, max_iter=100):
+taxi_geo_y = taxi_batch_geo.apply(
+    lambda x: 0 if x["morning_rush"] else 1 if x["evening_rush"] else 2,
+    axis=1
+)
+taxi_geo_y.head()
+
+print(np.sum(taxi_geo_y == 0), np.sum(taxi_geo_y == 1), np.sum(taxi_geo_y == 2))
+
+# Normalize
+taxi_geo_x_means = taxi_geo_x.mean()
+taxi_geo_x_stds = taxi_geo_x.std()
+taxi_geo_x_normalized = (taxi_geo_x - taxi_geo_x_means) / taxi_geo_x_stds
+taxi_geo_x_normalized.head()
+
+taxi_geo_x_normalized.describe()
+
+def k_means(x, n_clusters=3, max_iter=100):
     centers = x.sample(n_clusters).values
     print("Centers:", centers)
 
@@ -239,19 +263,51 @@ def k_means(x, n_clusters=2, max_iter=100):
 
     return labels, centers
 
-init_labels, init_centers = k_means(cashless_for_k_means_x, n_clusters=2, max_iter=1)
-print(len(np.where(init_labels == 0)), len(np.where(init_labels == 1)))
-print("average distance:", np.mean(np.sqrt(((cashless_for_k_means_x.values - init_centers[:, np.newaxis])**2).sum(axis=2))))
-print("loss:", np.sum(cashless_for_k_means_y == init_labels))
+init_labels, init_centers = k_means(taxi_geo_x_normalized, n_clusters=3, max_iter=1)
+print("Initial cluster sizes:", np.sum(init_labels == 0), np.sum(init_labels == 1), np.sum(init_labels == 2))
+print("Initial average distance:", np.mean(np.sqrt(((taxi_geo_x_normalized.values - init_centers[:, np.newaxis])**2).sum(axis=2))))
 
-labels, centers = k_means(cashless_for_k_means_x)
-print(len(np.where(labels == 0)), len(np.where(labels == 1)))
-print("average distance:", np.mean(np.sqrt(((cashless_for_k_means_x.values - centers[:, np.newaxis])**2).sum(axis=2))))
-print("loss:", np.sum(cashless_for_k_means_y == labels))
+labels, centers = k_means(taxi_geo_x_normalized, n_clusters=3)
+print("Cluster sizes:", np.sum(labels == 0), np.sum(labels == 1), np.sum(labels == 2))
+print("average distance:", np.mean(np.sqrt(((taxi_geo_x_normalized.values - centers[:, np.newaxis])**2).sum(axis=2))))
+
+from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score, confusion_matrix
+from itertools import permutations
+
+ari = adjusted_rand_score(taxi_geo_y, labels)
+nmi = normalized_mutual_info_score(taxi_geo_y, labels)
+
+print("Adjusted Rand Index (ARI):", ari)
+print("Normalized Mutual Information (NMI):", nmi)
+
+# Build confusion matrix: rows = true labels, cols = cluster labels
+cm = confusion_matrix(taxi_geo_y, labels)
+print("\nConfusion Matrix (rows=true time labels, cols=clusters):")
+print("         Cluster0  Cluster1  Cluster2")
+print(f"Morning:   {cm[0,0]:5d}     {cm[0,1]:5d}     {cm[0,2]:5d}")
+print(f"Evening:   {cm[1,0]:5d}     {cm[1,1]:5d}     {cm[1,2]:5d}")
+print(f"Neither:   {cm[2,0]:5d}     {cm[2,1]:5d}     {cm[2,2]:5d}")
+
+# Find best cluster-to-label mapping by trying all permutations
+best_accuracy = 0
+best_mapping = None
+label_names = ["morning", "evening", "neither"]
+
+for perm in permutations([0, 1, 2]):
+    # perm[i] = which true label cluster i maps to
+    mapped_labels = np.array([perm[c] for c in labels])
+    accuracy = np.mean(mapped_labels == taxi_geo_y)
+    if accuracy > best_accuracy:
+        best_accuracy = accuracy
+        best_mapping = perm
+
+print(f"\nBest cluster mapping: cluster 0→{label_names[best_mapping[0]]}, 1→{label_names[best_mapping[1]]}, 2→{label_names[best_mapping[2]]}")
+print(f"Best accuracy with optimal mapping: {best_accuracy:.2%}")
+
+# Apply best mapping for visualization
+labels_mapped = np.array([best_mapping[c] for c in labels])
 
 import umap
-
-
 
 import numpy as np
 import pandas as pd
@@ -306,24 +362,34 @@ def k_medoids(x, n_clusters=2, max_iter=100):
     return final_labels, medoids
 
 print("Initial run with max_iter=1 (one iteration):")
-init_labels_medoids, init_medoids = k_medoids(cashless_for_k_means_x, n_clusters=2, max_iter=1)
+init_labels_medoids, init_medoids = k_medoids(taxi_geo_x_normalized, n_clusters=3, max_iter=1)
 print("Initial Medoids:\n", init_medoids)
 print(f"Cluster 0 size: {np.sum(init_labels_medoids == 0)}, Cluster 1 size: {np.sum(init_labels_medoids == 1)}")
 
-init_distances_to_medoids = np.min(np.sqrt(((cashless_for_k_means_x.values[:, np.newaxis, :] - init_medoids[np.newaxis, :, :])**2).sum(axis=2)), axis=1)
+init_distances_to_medoids = np.min(np.sqrt(((taxi_geo_x_normalized.values[:, np.newaxis, :] - init_medoids[np.newaxis, :, :])**2).sum(axis=2)), axis=1)
 print("Average distance to medoids (initial state):", np.mean(init_distances_to_medoids))
 
 print("\nRunning K-Medoids for full convergence:")
-labels_medoids, medoids = k_medoids(cashless_for_k_means_x, n_clusters=2)
+labels_medoids, medoids = k_medoids(taxi_geo_x_normalized, n_clusters=3)
 print("Final Medoids:\n", medoids)
 print(f"Cluster 0 size: {np.sum(labels_medoids == 0)}, Cluster 1 size: {np.sum(labels_medoids == 1)}")
 
-final_distances_to_medoids = np.min(np.sqrt(((cashless_for_k_means_x.values[:, np.newaxis, :] - medoids[np.newaxis, :, :])**2).sum(axis=2)), axis=1)
+final_distances_to_medoids = np.min(np.sqrt(((taxi_geo_x_normalized.values[:, np.newaxis, :] - medoids[np.newaxis, :, :])**2).sum(axis=2)), axis=1)
 print("Average distance to medoids (final state):", np.mean(final_distances_to_medoids))
 
+from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
+
+ari_medoids = adjusted_rand_score(taxi_geo_y, labels_medoids)
+nmi_medoids = normalized_mutual_info_score(taxi_geo_y, labels_medoids)
+
+print("Adjusted Rand Index (ARI):", ari)
+print("Normalized Mutual Information (NMI):", nmi)
+
+import umap
+
 reducer = umap.UMAP(n_components=2, random_state=42)
-embedding_k_means = reducer.fit_transform(cashless_for_k_means_x)
-embedding_k_medoids = reducer.fit_transform(cashless_for_k_means_x)
+embedding_k_means = reducer.fit_transform(taxi_geo_x_normalized)
+embedding_k_medoids = reducer.fit_transform(taxi_geo_x_normalized)
 
 plt.figure(figsize=(15, 6))
 
@@ -345,3 +411,32 @@ plt.colorbar(label='Cluster Label')
 
 plt.tight_layout()
 plt.show()
+
+# Compare clusters vs true labels side by side
+plt.figure(figsize=(15, 6))
+
+plt.subplot(1, 2, 1)
+plt.scatter(embedding_k_means[:, 0], embedding_k_means[:, 1], c=labels_mapped, cmap='tab10', s=10, alpha=0.6)
+plt.title('K-Means Clusters (mapped to time labels)')
+plt.xlabel('UMAP Dimension 1')
+plt.ylabel('UMAP Dimension 2')
+plt.colorbar(label='Mapped: 0=morning, 1=evening, 2=neither')
+
+plt.subplot(1, 2, 2)
+plt.scatter(embedding_k_means[:, 0], embedding_k_means[:, 1], c=taxi_geo_y, cmap='tab10', s=10, alpha=0.6)
+plt.title('True Time Labels')
+plt.xlabel('UMAP Dimension 1')
+plt.ylabel('UMAP Dimension 2')
+plt.colorbar(label='True: 0=morning, 1=evening, 2=neither')
+
+plt.tight_layout()
+plt.show()
+
+# Show time distribution within each cluster
+print("\n--- Time distribution per cluster ---")
+for cluster_id in range(3):
+    mask = labels == cluster_id
+    morning_pct = np.mean(taxi_geo_y[mask] == 0) * 100
+    evening_pct = np.mean(taxi_geo_y[mask] == 1) * 100
+    neither_pct = np.mean(taxi_geo_y[mask] == 2) * 100
+    print(f"Cluster {cluster_id}: morning={morning_pct:.1f}%, evening={evening_pct:.1f}%, neither={neither_pct:.1f}%")
