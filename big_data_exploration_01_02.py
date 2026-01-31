@@ -185,6 +185,109 @@ midpoint = ((40.75 + 40.74) / 2, (-74.00 + -73.98) / 2)
 taxi_batch_geo["headed_downtown"] = np.linalg.norm(taxi_batch_geo[["pickup_latitude", "pickup_longitude"]] - midpoint, axis=1) < np.linalg.norm(taxi_batch_geo[["dropoff_latitude", "dropoff_longitude"]] - midpoint, axis=1)
 taxi_batch_geo.head()
 
+# ============ EXPLORATION: Morning vs Evening Rush Comparison ============
+print("\n" + "="*60)
+print("EXPLORING MORNING VS EVENING RUSH PATTERNS")
+print("="*60)
+
+# Filter to rush hours only (weekdays)
+morning_trips = taxi_batch_geo[(taxi_batch_geo["morning_rush"]) & (~taxi_batch_geo["is_weekend"])]
+evening_trips = taxi_batch_geo[(taxi_batch_geo["evening_rush"]) & (~taxi_batch_geo["is_weekend"])]
+
+print(f"Morning rush trips (weekday 7-9 AM): {len(morning_trips)}")
+print(f"Evening rush trips (weekday 4-6 PM): {len(evening_trips)}")
+
+# Compare business district patterns
+print("\n--- Business District Flow ---")
+print(f"Morning: TO business district: {morning_trips['to_business_district'].mean():.1%}, FROM: {morning_trips['from_business_district'].mean():.1%}")
+print(f"Evening: TO business district: {evening_trips['to_business_district'].mean():.1%}, FROM: {evening_trips['from_business_district'].mean():.1%}")
+
+# Compare headed_downtown
+print(f"\nMorning headed downtown: {morning_trips['headed_downtown'].mean():.1%}")
+print(f"Evening headed downtown: {evening_trips['headed_downtown'].mean():.1%}")
+
+# Visualize pickup locations: morning vs evening
+fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+
+# Morning pickups
+axes[0, 0].scatter(morning_trips["pickup_longitude"], morning_trips["pickup_latitude"],
+                   alpha=0.3, s=5, c='blue')
+axes[0, 0].set_title(f'Morning Rush PICKUPS (n={len(morning_trips)})')
+axes[0, 0].set_xlabel('Longitude')
+axes[0, 0].set_ylabel('Latitude')
+
+# Evening pickups
+axes[0, 1].scatter(evening_trips["pickup_longitude"], evening_trips["pickup_latitude"],
+                   alpha=0.3, s=5, c='orange')
+axes[0, 1].set_title(f'Evening Rush PICKUPS (n={len(evening_trips)})')
+axes[0, 1].set_xlabel('Longitude')
+axes[0, 1].set_ylabel('Latitude')
+
+# Morning dropoffs
+axes[1, 0].scatter(morning_trips["dropoff_longitude"], morning_trips["dropoff_latitude"],
+                   alpha=0.3, s=5, c='blue')
+axes[1, 0].set_title(f'Morning Rush DROPOFFS (n={len(morning_trips)})')
+axes[1, 0].set_xlabel('Longitude')
+axes[1, 0].set_ylabel('Latitude')
+
+# Evening dropoffs
+axes[1, 1].scatter(evening_trips["dropoff_longitude"], evening_trips["dropoff_latitude"],
+                   alpha=0.3, s=5, c='orange')
+axes[1, 1].set_title(f'Evening Rush DROPOFFS (n={len(evening_trips)})')
+axes[1, 1].set_xlabel('Longitude')
+axes[1, 1].set_ylabel('Latitude')
+
+plt.tight_layout()
+plt.show()
+
+# Compare average locations
+print("\n--- Average Coordinates ---")
+print(f"Morning pickup centroid:  ({morning_trips['pickup_latitude'].mean():.4f}, {morning_trips['pickup_longitude'].mean():.4f})")
+print(f"Evening pickup centroid:  ({evening_trips['pickup_latitude'].mean():.4f}, {evening_trips['pickup_longitude'].mean():.4f})")
+print(f"Morning dropoff centroid: ({morning_trips['dropoff_latitude'].mean():.4f}, {morning_trips['dropoff_longitude'].mean():.4f})")
+print(f"Evening dropoff centroid: ({evening_trips['dropoff_latitude'].mean():.4f}, {evening_trips['dropoff_longitude'].mean():.4f})")
+
+# Create a "net direction" feature: are dropoffs more downtown than pickups?
+# Using latitude as proxy (lower = more downtown in Manhattan)
+morning_trips_copy = morning_trips.copy()
+evening_trips_copy = evening_trips.copy()
+morning_trips_copy["lat_change"] = morning_trips_copy["dropoff_latitude"] - morning_trips_copy["pickup_latitude"]
+evening_trips_copy["lat_change"] = evening_trips_copy["dropoff_latitude"] - evening_trips_copy["pickup_latitude"]
+
+print(f"\nMorning avg latitude change: {morning_trips_copy['lat_change'].mean():.5f} (negative = going south/downtown)")
+print(f"Evening avg latitude change: {evening_trips_copy['lat_change'].mean():.5f}")
+
+# Histogram of lat change
+plt.figure(figsize=(12, 5))
+plt.subplot(1, 2, 1)
+plt.hist(morning_trips_copy["lat_change"], bins=50, alpha=0.7, label='Morning', color='blue')
+plt.hist(evening_trips_copy["lat_change"], bins=50, alpha=0.7, label='Evening', color='orange')
+plt.xlabel('Latitude Change (dropoff - pickup)')
+plt.ylabel('Count')
+plt.title('Direction of Travel: Morning vs Evening')
+plt.legend()
+plt.axvline(x=0, color='black', linestyle='--', alpha=0.5)
+
+# Same for longitude
+morning_trips_copy["lon_change"] = morning_trips_copy["dropoff_longitude"] - morning_trips_copy["pickup_longitude"]
+evening_trips_copy["lon_change"] = evening_trips_copy["dropoff_longitude"] - evening_trips_copy["pickup_longitude"]
+
+plt.subplot(1, 2, 2)
+plt.hist(morning_trips_copy["lon_change"], bins=50, alpha=0.7, label='Morning', color='blue')
+plt.hist(evening_trips_copy["lon_change"], bins=50, alpha=0.7, label='Evening', color='orange')
+plt.xlabel('Longitude Change (dropoff - pickup)')
+plt.ylabel('Count')
+plt.title('East-West Movement: Morning vs Evening')
+plt.legend()
+plt.axvline(x=0, color='black', linestyle='--', alpha=0.5)
+
+plt.tight_layout()
+plt.show()
+
+print("\n" + "="*60)
+print("END EXPLORATION")
+print("="*60 + "\n")
+
 """## 4. Implement Different Techniques for Handling Large Datasets
 
 ### Classification Model
