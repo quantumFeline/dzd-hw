@@ -218,6 +218,16 @@ cashless_for_k_means_x = cashless[["trip_distance", "passenger_count", "fare_amo
 cashless_for_k_means_y = cashless["large_tip"]
 cashless_for_k_means_x.head()
 
+# Normalize
+cashless_for_k_means_x_means = cashless_for_k_means_x.mean()
+cashless_for_k_means_x_stds = cashless_for_k_means_x.std()
+print(cashless_for_k_means_x_means)
+print(cashless_for_k_means_x_stds)
+cashless_data_normalized = (cashless_for_k_means_x - cashless_for_k_means_x_means) / cashless_for_k_means_x_stds
+cashless_data_normalized.head()
+
+cashless_data_normalized.describe()
+
 def k_means(x, n_clusters=2, max_iter=100):
     centers = x.sample(n_clusters).values
     print("Centers:", centers)
@@ -239,19 +249,23 @@ def k_means(x, n_clusters=2, max_iter=100):
 
     return labels, centers
 
-init_labels, init_centers = k_means(cashless_for_k_means_x, n_clusters=2, max_iter=1)
-print(len(np.where(init_labels == 0)), len(np.where(init_labels == 1)))
-print("average distance:", np.mean(np.sqrt(((cashless_for_k_means_x.values - init_centers[:, np.newaxis])**2).sum(axis=2))))
+init_labels, init_centers = k_means(cashless_data_normalized, n_clusters=2, max_iter=1)
+print(np.sum(init_labels == 0), np.sum(init_labels == 1))
+print("average distance:", np.mean(np.sqrt(((cashless_data_normalized.values - init_centers[:, np.newaxis])**2).sum(axis=2))))
 print("loss:", np.sum(cashless_for_k_means_y == init_labels))
 
-labels, centers = k_means(cashless_for_k_means_x)
-print(len(np.where(labels == 0)), len(np.where(labels == 1)))
-print("average distance:", np.mean(np.sqrt(((cashless_for_k_means_x.values - centers[:, np.newaxis])**2).sum(axis=2))))
-print("loss:", np.sum(cashless_for_k_means_y == labels))
+labels, centers = k_means(cashless_data_normalized)
+print(np.sum(labels == 0), np.sum(labels == 1))
+print("average distance:", np.mean(np.sqrt(((cashless_data_normalized.values - centers[:, np.newaxis])**2).sum(axis=2))))
+
+print(np.sum(labels == 0), np.sum(labels == 1))
+
+# Find which cluster matches
+large_tip_share_0 = np.sum(cashless_for_k_means_y == (labels == 0))
+large_tip_share_1 = np.sum(cashless_for_k_means_y == (labels == 1))
+print("Cluster agreement:", max(large_tip_share_0, large_tip_share_1) / len(labels))
 
 import umap
-
-
 
 import numpy as np
 import pandas as pd
@@ -306,24 +320,31 @@ def k_medoids(x, n_clusters=2, max_iter=100):
     return final_labels, medoids
 
 print("Initial run with max_iter=1 (one iteration):")
-init_labels_medoids, init_medoids = k_medoids(cashless_for_k_means_x, n_clusters=2, max_iter=1)
+init_labels_medoids, init_medoids = k_medoids(cashless_data_normalized, n_clusters=2, max_iter=1)
 print("Initial Medoids:\n", init_medoids)
 print(f"Cluster 0 size: {np.sum(init_labels_medoids == 0)}, Cluster 1 size: {np.sum(init_labels_medoids == 1)}")
 
-init_distances_to_medoids = np.min(np.sqrt(((cashless_for_k_means_x.values[:, np.newaxis, :] - init_medoids[np.newaxis, :, :])**2).sum(axis=2)), axis=1)
+init_distances_to_medoids = np.min(np.sqrt(((cashless_data_normalized.values[:, np.newaxis, :] - init_medoids[np.newaxis, :, :])**2).sum(axis=2)), axis=1)
 print("Average distance to medoids (initial state):", np.mean(init_distances_to_medoids))
 
 print("\nRunning K-Medoids for full convergence:")
-labels_medoids, medoids = k_medoids(cashless_for_k_means_x, n_clusters=2)
+labels_medoids, medoids = k_medoids(cashless_data_normalized, n_clusters=2)
 print("Final Medoids:\n", medoids)
 print(f"Cluster 0 size: {np.sum(labels_medoids == 0)}, Cluster 1 size: {np.sum(labels_medoids == 1)}")
 
-final_distances_to_medoids = np.min(np.sqrt(((cashless_for_k_means_x.values[:, np.newaxis, :] - medoids[np.newaxis, :, :])**2).sum(axis=2)), axis=1)
+final_distances_to_medoids = np.min(np.sqrt(((cashless_data_normalized.values[:, np.newaxis, :] - medoids[np.newaxis, :, :])**2).sum(axis=2)), axis=1)
 print("Average distance to medoids (final state):", np.mean(final_distances_to_medoids))
 
+# Find which cluster matches
+large_tip_share_0_medoids = np.sum(cashless_for_k_means_y == (labels_medoids == 0))
+large_tip_share_1_medoids = np.sum(cashless_for_k_means_y == (labels_medoids == 1))
+print("Cluster agreement:", max(large_tip_share_0_medoids, large_tip_share_1_medoids) / len(labels_medoids))
+
+import umap
+
 reducer = umap.UMAP(n_components=2, random_state=42)
-embedding_k_means = reducer.fit_transform(cashless_for_k_means_x)
-embedding_k_medoids = reducer.fit_transform(cashless_for_k_means_x)
+embedding_k_means = reducer.fit_transform(cashless_data_normalized)
+embedding_k_medoids = reducer.fit_transform(cashless_data_normalized)
 
 plt.figure(figsize=(15, 6))
 
